@@ -1,0 +1,81 @@
+services:
+  # Zookeeper
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+
+  # Kafka
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  # RocketMQ NameServer
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.1.4
+    container_name: rocketmq-namesrv
+    command: sh mqnamesrv
+    ports:
+      - "9876:9876"
+    platform: linux/amd64
+
+  # RocketMQ Broker for Docker app
+  rocketmq-broker:
+    image: apache/rocketmq:5.1.4
+    container_name: rocketmq-broker
+    depends_on:
+      - rocketmq-namesrv
+    command: sh mqbroker -n rocketmq-namesrv:9876 -c /home/rocketmq/broker.conf
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+    volumes:
+      - ./broker.conf:/home/rocketmq/broker.conf:ro
+      - ./data/rocketmq/store:/home/rocketmq/store
+    environment:
+      - JAVA_OPT_EXT=-Duser.home=/home/rocketmq
+    platform: linux/amd64
+    profiles:
+      - docker
+
+  # RocketMQ Console
+  rocketmq-console:
+    image: apacherocketmq/rocketmq-dashboard:latest
+    container_name: rocketmq-console
+    ports:
+      - "9190:8080"
+    environment:
+      JAVA_OPTS: "-Drocketmq.namesrv.addr=rocketmq-namesrv:9876 -Dcom.rocketmq.sendMessageWithVIPChannel=false"
+    depends_on:
+      - rocketmq-namesrv
+    platform: linux/amd64
+
+  # Application - Only included when running full stack
+  betsettlement:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: betsettlement-app
+    ports:
+      - "9090:9090"
+    depends_on:
+      - rocketmq-broker  # Now matches the service name above
+      - kafka
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+    profiles:
+      - docker
